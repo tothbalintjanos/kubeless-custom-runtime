@@ -8,6 +8,11 @@ from multiprocessing import Process, Queue
 import bottle
 import prometheus_client as prom
 
+try:
+    import queue
+except:
+    import Queue as queue
+
 mod = imp.load_source('function',
                       '/kubeless/%s.py' % os.getenv('MOD_NAME'))
 func = getattr(mod, os.getenv('FUNC_HANDLER'))
@@ -32,6 +37,7 @@ function_context = {
     'timeout': timeout,
     'runtime': os.getenv('FUNC_RUNTIME'),
     'memory-limit': os.getenv('FUNC_MEMORY_LIMIT'),
+    'prom': prom
 }
 
 def funcWrap(q, event, c):
@@ -74,14 +80,14 @@ def handler():
             q = Queue()
             p = Process(target=funcWrap, args=(q, event, function_context))
             p.start()
-            p.join(timeout)
-            # If thread is still active
-            if p.is_alive():
+
+            try:
+                res = q.get(block=True, timeout=timeout)
+            except queue.Empty:
                 p.terminate()
                 p.join()
                 return bottle.HTTPError(408, "Timeout while processing the function")
             else:
-                res = q.get()
                 if isinstance(res, Exception):
                     raise res
                 return res
